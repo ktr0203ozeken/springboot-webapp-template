@@ -6,6 +6,7 @@ Web機能、セキュリティ、バリデーション、MyBatisによるDB操�
 Docker によるローカル開発環境の立ち上げもサポートしています。
 
 
+
 ## 📦 使用技術
 
 - Java 21
@@ -34,12 +35,16 @@ Docker によるローカル開発環境の立ち上げもサポートしてい�
   - .env による環境変数管理
 
 
+
 ## 📁 ディレクトリ構成
-このテンプレートでは、ルートプロジェクトとバックエンドプロジェクト（example-backend）を分離し、Gradle の **Composite Build** 機能を使って管理しています。これにより、以下のメリットがあります：
+このテンプレートでは、ルートプロジェクトとバックエンドプロジェクト（example-backend）を分離し、Gradle の **Multi-Project Build** 機能を使って管理しています。これにより、以下のメリットがあります：
 
 - サブプロジェクト（example-backend）単体のビルドや開発がしやすい
-- 複数モジュールへの拡張がしやすい
+- 将来的にフロントエンド（例：**frontend**）など複数モジュールへの拡張がしやすい
 - Docker ビルドなどで柔軟に構成できる
+
+> 💡 今回のテンプレートは Thymeleaf と Spring Boot だけで完結するため、**frontend** ディレクトリは存在しません。
+> しかし、拡張性が高いテンプレートにするために今回`backend`に分割する構成を採用しています。
 
 ```bash
 .
@@ -48,7 +53,6 @@ Docker によるローカル開発環境の立ち上げもサポートしてい�
 ├── springboot-webapp-template-backend/
 │   ├── Dockerfile                           # Spring BootアプリのDockerイメージ
 │   ├── build.gradle                         # backendモジュール用のGradle設定
-│   ├── settings.gradle
 │   └── src/
 │       ├── main/
 │       │   └── resources/
@@ -186,14 +190,15 @@ FROM eclipse-temurin:21-jdk AS build
 WORKDIR /app
 
 # ビルドに必要なファイルをコピーして依存関係をキャッシュ
-COPY example-backend/build.gradle example-backend/settings.gradle example-backend/gradlew example-backend/gradlew.bat ./
-COPY example-backend/gradle ./gradle
+COPY build.gradle settings.gradle gradlew gradlew.bat ./
+COPY gradle ./gradle
+COPY example-backend/build.gradle ./example-backend/
 
 # gradlewに実行権限を付与（Linux環境）
 RUN chmod +x gradlew
 
 # ソースコードをコピーしてビルド
-COPY example-backend/src ./src
+COPY example-backend/src ./example-backend/src
 RUN ./gradlew clean build --no-daemon
 
 # Runtime stage
@@ -201,7 +206,7 @@ FROM eclipse-temurin:21-jre
 WORKDIR /app
 
 # build stage からビルド済み JAR ファイルのみをコピー
-COPY --from=build /app/build/libs/*.jar app.jar
+COPY --from=build /app/example-backend/build/libs/*.jar app.jar
 
 # アプリ起動
 CMD ["java", "-jar", "app.jar"]
@@ -239,69 +244,30 @@ services:
 
 ### rootの`settings.gradle`
 
-以下は、**Composite Build** 構成のための `settings.gradle` の記述例です。
+以下は、**Multi-Project Build** 構成のための `settings.gradle` の記述例です。
 ```gradle
 // プロジェクト全体の名前を定義
 rootProject.name = 'example'
 
-// backend ディレクトリを Composite Build として含める
-includeBuild 'example-backend'
+// backend ディレクトリを Multi-Project Build として含める
+include('example-backend')
 ```
 
 
 ### rootの`build.gradle`
 
-以下は、ルートプロジェクトにおいて **Composite Build** を操作するためのタスク を定義した `build.gradle` の記述例です。
+以下は、ルートプロジェクトにおいて **Multi-Project Build** を操作するためのタスク を定義した `build.gradle` の記述例です。
+
+このテンプレートでは、Heroku など一部の PaaS 環境に対応するために、カスタムの `stage` タスクを定義しています。Heroku の Java ビルドパックでは、デフォルトで `./gradlew stage` が実行されるため、このタスクを>定義して bootJar に依存させることで、デプロイ時に自動的に JAR が生成されるようにしています。
 
 ```gradle
-// ==========================================
-// Composite Build用 ルートプロジェクト設定
-// example-backendプロジェクトのタスクをルートから実行可能にする
-// ==========================================
-
-// ビルド成果物の削除
-tasks.register("clean") {
-    group = "build"
-    description = "Cleans backend build outputs"
-    dependsOn gradle.includedBuild("example-backend").task(":clean")
-}
-
-// Javaソースとリソースのコンパイル
-tasks.register("compile") {
-    group = "build" 
-    description = "Compiles backend application"
-    dependsOn gradle.includedBuild("example-backend").task(":classes")
-}
-
-// 単体テストの実行
-tasks.register("test") {
-    group = "verification"
-    description = "Runs backend tests"
-    dependsOn gradle.includedBuild("example-backend").task(":test")
-}
-
-// コード品質チェック（静的解析等）
-tasks.register("check") {
-    group = "verification"
-    description = "Runs all verification tasks"
-    dependsOn gradle.includedBuild("example-backend").task(":check")
-}
-
-// テストなしでの実行可能JARファイル作成（ローカル）
-tasks.register("build") {
-    group = "build"
-    description = "Builds backend application without tests"
-    dependsOn gradle.includedBuild("example-backend").task(":bootJar")
-}
-
 // Heroku等のデプロイプラットフォーム用
 tasks.register("stage") {
     group = "build"
     description = "Prepares application for deployment"
-    dependsOn("build")
+    dependsOn("example-backend:bootJar")
 }
 ```
-
 
 ### `application.properties`
 
