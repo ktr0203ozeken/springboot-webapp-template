@@ -1,0 +1,6 @@
+// Heroku等のデプロイプラットフォーム用
+tasks.register("stage") {
+    group = "build"
+    description = "Prepares application for deployment"
+    dependsOn("springboot-webapp-template-backend:bootJar")
+}
